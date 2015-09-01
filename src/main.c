@@ -16,8 +16,10 @@
 #include <string.h>
 #include <math.h>
 
+#include <openssl/evp.h>
+#include <openssl/aes.h>
+
 #include "sha256.h"
-#include "aes.h"
 
 extern int curve25519_donna(uint8_t *mypublic, const uint8_t *secret, const uint8_t *basepoint);
 
@@ -60,6 +62,52 @@ char *base64_encode(const unsigned char *data,
         encoded_data[*output_length - 1 - i] = '=';
 
     return encoded_data;
+}
+
+int aes_init(unsigned char *key_data, int key_data_len, unsigned char *salt, EVP_CIPHER_CTX *e_ctx, 
+             EVP_CIPHER_CTX *d_ctx)
+{
+  int i, nrounds = 5;
+  unsigned char key[32], iv[32];
+
+  i = EVP_BytesToKey(EVP_aes_256_cbc(), EVP_sha1(), salt, key_data, key_data_len, nrounds, key, iv);
+  if (i != 32) {
+    printf("Key size is %d bits - should be 256 bits\n", i);
+    return -1;
+  }
+
+  EVP_CIPHER_CTX_init(e_ctx);
+  EVP_EncryptInit_ex(e_ctx, EVP_aes_256_cbc(), NULL, key, iv);
+  EVP_CIPHER_CTX_init(d_ctx);
+  EVP_DecryptInit_ex(d_ctx, EVP_aes_256_cbc(), NULL, key, iv);
+
+  return 0;
+}
+
+unsigned char *aes_encrypt(EVP_CIPHER_CTX *e, unsigned char *plaintext, int *len)
+{
+  int c_len = *len + AES_BLOCK_SIZE, f_len = 0;
+  unsigned char *ciphertext = malloc(c_len);
+
+  EVP_EncryptInit_ex(e, NULL, NULL, NULL, NULL);
+  EVP_EncryptUpdate(e, ciphertext, &c_len, plaintext, *len);
+  EVP_EncryptFinal_ex(e, ciphertext+c_len, &f_len);
+
+  *len = c_len + f_len;
+  return ciphertext;
+}
+
+unsigned char *aes_decrypt(EVP_CIPHER_CTX *e, unsigned char *ciphertext, int *len)
+{
+  int p_len = *len, f_len = 0;
+  unsigned char *plaintext = malloc(p_len);
+  
+  EVP_DecryptInit_ex(e, NULL, NULL, NULL, NULL);
+  EVP_DecryptUpdate(e, plaintext, &p_len, ciphertext, *len);
+  EVP_DecryptFinal_ex(e, plaintext+p_len, &f_len);
+
+  *len = p_len + f_len;
+  return plaintext;
 }
 
 void print_seperator(){ // probably silly, but it cleans up the code below a bit.
@@ -126,9 +174,10 @@ int main(int argc, char const *argv[])
    		sprintf((char *)hash_buffer + strlen(hash_buffer),"%02x", buf[idx]);
    	}
 	printf("Hashed secret: %s\n", (const char *)hash_buffer);
-	
+	unsigned char *shared_hash = (unsigned char *)hash_buffer;
+
    	// Define our message, then spit out the hash (for reference later)
-   	char message_to_bob[44] = "The quick brown fox jumps over the lazy dog";
+   	const char *message_to_bob = "The quick brown fox jumps over the lazy dog";
 	memset((char *)hash_buffer, 0, sizeof(hash_buffer));
    	for (int idx=0; idx < 32; idx++) {
    		sprintf((char *)hash_buffer + strlen(hash_buffer),"%02x", message_to_bob[idx]);
@@ -138,15 +187,36 @@ int main(int argc, char const *argv[])
 
    	// Encrypt data with shared key
    	printf("Encrypting message...\n");
-   	WORD key_schedule[60], idx;
-	BYTE enc_buf[128];
+   	EVP_CIPHER_CTX en, de;
+   	unsigned int salt[] = {12345, 54321};
+   	char *plaintext;
+    unsigned char *ciphertext;
+    int olen, len;
+    olen = len = strlen(message_to_bob)+1;
 
-	int pass = 1;
-	aes_key_setup(&buf[0], key_schedule, 256);
-
-	for(idx = 0; idx < 2; idx++) {
-		aes_encrypt((const BYTE *)message_to_bob[idx], enc_buf, key_schedule, 256);
-		//aes_decrypt(ciphertext[idx], enc_buf, key_schedule, 256);
+	if (aes_init((unsigned char *)shared_hash, sizeof(shared_hash), (unsigned char *)&salt, &en, &de)) {
+		printf("Couldn't initialize AES cipher\n");
+		return -1;
 	}
+	// Spit out hash of ciphertext
+	ciphertext = aes_encrypt(&en, (unsigned char *)message_to_bob, &len);
+	memset((char *)hash_buffer, 0, sizeof(hash_buffer));
+   	for (int idx=0; idx < 32; idx++) {
+   		sprintf((char *)hash_buffer + strlen(hash_buffer),"%02x", ciphertext[idx]);
+   	}
+   	printf("Hashed ciphertext: %s\n", (const char *)hash_buffer);
+   	// Spit out hash of plaintext 
+    plaintext = (char *)aes_decrypt(&de, ciphertext, &len);
+    memset((char *)hash_buffer, 0, sizeof(hash_buffer));
+   	for (int idx=0; idx < 32; idx++) {
+   		sprintf((char *)hash_buffer + strlen(hash_buffer),"%02x", plaintext[idx]);
+   	}
+   	printf("Hashed decrypted plaintext: %s\n", (const char *)hash_buffer);
+
+    if (strncmp(plaintext, message_to_bob, olen)) 
+      printf("FAIL: enc/dec failed for \"%s\"\n", message_to_bob);
+    else 
+      printf("OK: enc/dec ok for \"%s\"\n", plaintext);
+
 	return 0;
 }
