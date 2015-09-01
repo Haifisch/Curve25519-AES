@@ -33,7 +33,6 @@ static char encoding_table[] = {'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H',
                                 'o', 'p', 'q', 'r', 's', 't', 'u', 'v',
                                 'w', 'x', 'y', 'z', '0', '1', '2', '3',
                                 '4', '5', '6', '7', '8', '9', '+', '/'};
-static char *decoding_table = NULL;
 static int mod_table[] = {0, 2, 1};
 
 char *base64_encode(const unsigned char *data,
@@ -131,10 +130,7 @@ int main(int argc, char const *argv[])
 	// Round one, Alice.
 	printf("Generating keys for Alice...");
 	// generate 32 random bytes for the private key
-	srand(time(NULL));
-	for (int i = 0; i < sizeof(alice_private); i++) {
-	    alice_private[i] = rand() % 256;
-	}
+	RAND_bytes(alice_private, sizeof(alice_private));
 	// base64 encode private key and spit it out
 	alice_private_encoded = base64_encode((const unsigned char*)alice_private, sizeof(alice_private), &encoded_size);
 	printf("\nPrivate Key #1 = %s\n", alice_private_encoded);
@@ -150,10 +146,7 @@ int main(int argc, char const *argv[])
 	// Round two, Bob.
 	printf("Generating keys for Bob...");
 	// generate 32 random bytes for the private key
-	srand(time(NULL));
-	for (int i = 0; i < sizeof(bob_private); i++) {
-	    bob_private[i] = rand() % 256;
-	}
+	RAND_bytes(bob_private, sizeof(bob_private));
 	// base64 encode private key and spit it out
 	bob_private_encoded = base64_encode((const unsigned char*)bob_private, sizeof(bob_private), &encoded_size);
 	printf("\nPrivate Key #2 = %s\n", bob_private_encoded);
