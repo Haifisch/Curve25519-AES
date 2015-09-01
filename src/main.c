@@ -136,8 +136,8 @@ int main(int argc, char const *argv[])
 	printf("\nPrivate Key #1 = %s\n", alice_private_encoded);
 	printf("Unencoded size: %lu\t-\t Encoded size: %zu\n", sizeof(alice_private), encoded_size);
 	// generate public key, encode it, and then spit it out
-  	curve25519_donna(alice_public, alice_private, basepoint);
-  	alice_public_encoded = base64_encode((const unsigned char*)alice_public, sizeof(alice_public), &encoded_size);
+  curve25519_donna(alice_public, alice_private, basepoint);
+  alice_public_encoded = base64_encode((const unsigned char*)alice_public, sizeof(alice_public), &encoded_size);
 	printf("Public Key  #1 = %s\n", alice_public_encoded);
 	printf("Unencoded size: %lu\t-\t Encoded size: %zu\n", sizeof(alice_public), encoded_size);
 
@@ -152,41 +152,41 @@ int main(int argc, char const *argv[])
 	printf("\nPrivate Key #2 = %s\n", bob_private_encoded);
 	printf("Unencoded size: %lu\t-\t Encoded size: %zu\n", sizeof(bob_private), encoded_size);
 	// generate public key, encode it, and then spit it out
-  	curve25519_donna(bob_public, bob_private, basepoint);
-  	bob_public_encoded = base64_encode((const unsigned char*)bob_public, sizeof(bob_public), &encoded_size);
+  curve25519_donna(bob_public, bob_private, basepoint);
+  bob_public_encoded = base64_encode((const unsigned char*)bob_public, sizeof(bob_public), &encoded_size);
 	printf("Public Key  #2 = %s\n", bob_public_encoded);
 	printf("Unencoded size: %lu\t-\t Encoded size: %zu\n", sizeof(bob_public), encoded_size);
 	print_seperator();
 
 	// Generate shared key and spit out the hash
-  	curve25519_donna(shared, alice_private, bob_public);
+  curve25519_donna(shared, alice_private, bob_public);
 	sha256_init(&ctx);
 	sha256_update(&ctx, shared, strlen((const char *)shared));
 	sha256_final(&ctx, buf);
 
-   	for (int idx=0; idx < 32; idx++) {
-   		sprintf((char *)hash_buffer + strlen(hash_buffer),"%02x", buf[idx]);
-   	}
+  for (int idx=0; idx < 32; idx++) {
+   	sprintf((char *)hash_buffer + strlen(hash_buffer),"%02x", buf[idx]);
+  }
 	printf("Hashed secret: %s\n", (const char *)hash_buffer);
 	unsigned char *shared_hash = (unsigned char *)hash_buffer;
 
-   	// Define our message, then spit out the hash (for reference later)
-   	const char *message_to_bob = "The quick brown fox jumps over the lazy dog";
+  // Define our message, then spit out the hash (for reference later)
+  const char *message_to_bob = "The quick brown fox jumps over the lazy dog";
 	memset((char *)hash_buffer, 0, sizeof(hash_buffer));
-   	for (int idx=0; idx < 32; idx++) {
-   		sprintf((char *)hash_buffer + strlen(hash_buffer),"%02x", message_to_bob[idx]);
-   	}
-   	printf("Hashed original message: %s\n", (const char *)hash_buffer);
-   	print_seperator();
+  for (int idx=0; idx < 32; idx++) {
+  	sprintf((char *)hash_buffer + strlen(hash_buffer),"%02x", message_to_bob[idx]);
+  }
+  printf("Hashed original message: %s\n", (const char *)hash_buffer);
+  print_seperator();
 
-   	// Encrypt data with shared key
-   	printf("Encrypting message...\n");
-   	EVP_CIPHER_CTX en, de;
-   	unsigned int salt[] = {12345, 54321};
-   	char *plaintext;
-    unsigned char *ciphertext;
-    int olen, len;
-    olen = len = strlen(message_to_bob)+1;
+  // Encrypt data with shared key
+  printf("Encrypting message...\n");
+  EVP_CIPHER_CTX en, de;
+  unsigned int salt[] = {12345, 54321};
+ 	char *plaintext;
+  unsigned char *ciphertext;
+  int olen, len;
+  olen = len = strlen(message_to_bob)+1;
 
 	if (aes_init((unsigned char *)shared_hash, sizeof(shared_hash), (unsigned char *)&salt, &en, &de)) {
 		printf("Couldn't initialize AES cipher\n");
@@ -195,24 +195,25 @@ int main(int argc, char const *argv[])
 	// Spit out hash of ciphertext
 	ciphertext = aes_encrypt(&en, (unsigned char *)message_to_bob, &len);
 	memset((char *)hash_buffer, 0, sizeof(hash_buffer));
-   	for (int idx=0; idx < 32; idx++) {
-   		sprintf((char *)hash_buffer + strlen(hash_buffer),"%02x", ciphertext[idx]);
-   	}
-   	printf("Hashed ciphertext: %s\n", (const char *)hash_buffer);
-   	// Spit out hash of plaintext 
-    plaintext = (char *)aes_decrypt(&de, ciphertext, &len);
-    memset((char *)hash_buffer, 0, sizeof(hash_buffer));
-   	for (int idx=0; idx < 32; idx++) {
-   		sprintf((char *)hash_buffer + strlen(hash_buffer),"%02x", plaintext[idx]);
-   	}
-   	printf("Hashed decrypted plaintext: %s\n", (const char *)hash_buffer);
+ 	for (int idx=0; idx < 32; idx++) {
+ 		sprintf((char *)hash_buffer + strlen(hash_buffer),"%02x", ciphertext[idx]);
+ 	}
+ 	printf("Hashed ciphertext: %s\n", (const char *)hash_buffer);
+ 	// Spit out hash of plaintext 
+  plaintext = (char *)aes_decrypt(&de, ciphertext, &len);
+  memset((char *)hash_buffer, 0, sizeof(hash_buffer));
+ 	for (int idx=0; idx < 32; idx++) {
+ 		sprintf((char *)hash_buffer + strlen(hash_buffer),"%02x", plaintext[idx]);
+ 	}
+ 	printf("Hashed decrypted plaintext: %s\n", (const char *)hash_buffer);
 
-   	print_seperator();
+ 	print_seperator();
 
-    if (strncmp(plaintext, message_to_bob, olen)) 
-      printf("FAIL: enc/dec failed\n");
-    else 
-      printf("PASS: enc/dec passed\n");
-
+  if (strncmp(plaintext, message_to_bob, olen)) {
+    printf("FAIL: enc/dec failed\n");
+  }  else {
+    printf("PASS: enc/dec passed\n");
+  }
+  
 	return 0;
 }
