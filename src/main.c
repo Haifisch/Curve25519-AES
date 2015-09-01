@@ -110,6 +110,33 @@ unsigned char *aes_decrypt(EVP_CIPHER_CTX *e, unsigned char *ciphertext, int *le
   return plaintext;
 }
 
+/*
+
+
+　　　　　　　　　　▄█▀█▀█▄
+　　　　　　　　▄█▀　　█　　▀█▄
+　　　　　　　▄█▀　　　　　　　▀█▄
+　　　　　　　█　　　　　　　　　　　█
+　　　　　　　█　　　　　　　　　　　█
+　　　　　　　▀█▄▄　　█　　　▄█▀
+　　　　　　　　　█　　▄▀▄　　█
+　　　　　　　　　█　▀　　　▀　█
+　　　　　　　　　█　　　　　　　█
+　　　　　　　　　█　　　　　　　█
+　　　　　　　　　█　　　　 　　 █
+　　　　　　　　　█　　　　　　　█
+　　　　　　　　　█　　　　　　　█
+　　　▄█▀▀█▄█　　　　　　　█▄█▀█▄
+　▄█▀▀　　　　▀　　　　　　　　　　　　▀▀█
+█▀　　　　　　　　　　　　　　　　　　　　　　▀█
+█　　　　　　　　　　　　　　　　　　　　　　　　█
+█　　　　　　　　　　　▄█▄　　　　　　　　　　█
+▀█　　　　　　　　　█▀　▀█　　　　　　　　█▀
+　▀█▄　　　　　　█▀　　　▀█　　　　　▄█▀
+　　　▀█▄▄▄█▀　　　　　　▀█▄▄▄█▀
+　　　
+　　　*/
+　　　
 void print_seperator(){ // probably silly, but it cleans up the code below a bit.
 	printf("-------------------------------------------------------------\n");
 }
