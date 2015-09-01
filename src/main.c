@@ -3,7 +3,8 @@
  *  Created; 08/31/15
  *  Description; 
  *  	Some little PoC I wrote to show how one could use Curve25519 shared secrets between two peers for AES encryption. 
- *	For forward secrecy (and deniability), and to prevent bruteforcing shared keys, user keys should be obliterated and regenerated after 24 hours or sooner 		
+ *	For forward secrecy (and deniability), and to prevent bruteforcing shared keys, user keys should be obliterated and regenerated after 24 hours or sooner. 		
+ *	Note; This probably isn't as secure as it could be. For instance; random bytes generated for the private keys are not using cryptographically secure sources, I'll attempt to fix this later. 
  *
  *  Future function for Orthros - https://github.com/getOrthros
  *  Copyright (c) 2015 Dylan "Haifisch" Laws
@@ -213,10 +214,12 @@ int main(int argc, char const *argv[])
    	}
    	printf("Hashed decrypted plaintext: %s\n", (const char *)hash_buffer);
 
+   	print_seperator();
+
     if (strncmp(plaintext, message_to_bob, olen)) 
-      printf("FAIL: enc/dec failed for \"%s\"\n", message_to_bob);
+      printf("FAIL: enc/dec failed\n");
     else 
-      printf("OK: enc/dec ok for \"%s\"\n", plaintext);
+      printf("PASS: enc/dec passed\n");
 
 	return 0;
 }
