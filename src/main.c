@@ -3,7 +3,7 @@
  *  Created; 08/31/15
  *  Description; 
  *    Some little PoC I wrote to show how one could use Curve25519 shared secrets between two peers for AES encryption. 
- *  For forward secrecy (and deniability), and to prevent bruteforcing shared keys, user keys should be obliterated and regenerated after 24 hours or sooner.     
+ *  For forward secrecy (and build-in deniability for the sender/reciever) user keys should be obliterated and regenerated after 24 hours or sooner.     
  *  Note; This probably isn't as secure as it could be. For instance; random bytes generated for the private keys are not using cryptographically secure sources, I'll attempt to fix this later. 
  *
  *  Future function for Orthros - https://github.com/getOrthros
@@ -117,14 +117,17 @@ void print_seperator(){ // probably silly, but it cleans up the code below a bit
 int main(int argc, char const *argv[])
 {
   static const uint8_t basepoint[32] = {9};
-  unsigned char alice_private[32], alice_public[32], bob_private[32], bob_public[32];
-  char *alice_private_encoded, *alice_public_encoded, *bob_private_encoded, *bob_public_encoded;
+  unsigned int salt[] = {12345, 54321};
+  int olen, len;
+  unsigned char alice_private[32], alice_public[32], bob_private[32], bob_public[32], *ciphertext;
+  char *alice_private_encoded, *alice_public_encoded, *bob_private_encoded, *bob_public_encoded, *plaintext;
   size_t encoded_size; 
   uint8_t shared[32];
-  const char hash_buffer[256];
+  const char hash_buffer[64];
 
   BYTE buf[SHA256_BLOCK_SIZE];
   SHA256_CTX ctx;
+  EVP_CIPHER_CTX en, de;
 
   print_seperator();
   // Round one, Alice.
@@ -181,17 +184,13 @@ int main(int argc, char const *argv[])
 
   // Encrypt data with shared key
   printf("Encrypting message...\n");
-  EVP_CIPHER_CTX en, de;
-  unsigned int salt[] = {12345, 54321};
-  char *plaintext;
-  unsigned char *ciphertext;
-  int olen, len;
   olen = len = strlen(message_to_bob)+1;
 
   if (aes_init((unsigned char *)shared_hash, sizeof(shared_hash), (unsigned char *)&salt, &en, &de)) {
     printf("Couldn't initialize AES cipher\n");
     return -1;
   }
+
   // Spit out hash of ciphertext
   ciphertext = aes_encrypt(&en, (unsigned char *)message_to_bob, &len);
   memset((char *)hash_buffer, 0, sizeof(hash_buffer));
@@ -199,20 +198,21 @@ int main(int argc, char const *argv[])
     sprintf((char *)hash_buffer + strlen(hash_buffer),"%02x", ciphertext[idx]);
   }
   printf("Hashed ciphertext: %s\n", (const char *)hash_buffer);
+
   // Spit out hash of plaintext 
   plaintext = (char *)aes_decrypt(&de, ciphertext, &len);
   memset((char *)hash_buffer, 0, sizeof(hash_buffer));
   for (int idx=0; idx < 32; idx++) {
     sprintf((char *)hash_buffer + strlen(hash_buffer),"%02x", plaintext[idx]);
   }
-  printf("Hashed decrypted plaintext: %s\n", (const char *)hash_buffer);
-
+  printf("Hashed plaintext: %s\n", (const char *)hash_buffer);
   print_seperator();
 
+  // Verify encryption and decryption was successful. 
   if (strncmp(plaintext, message_to_bob, olen)) {
-    printf("FAIL: enc/dec failed\n");
+    printf("AES: enc/dec failed\n");
   }  else {
-    printf("PASS: enc/dec passed\n");
+    printf("AES: enc/dec passed\n");
   }
 
   return 0;
