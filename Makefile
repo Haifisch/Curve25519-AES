@@ -21,5 +21,5 @@ curve25519:
 twist_aes: clean curve25519 $(TWIST_OBJS)
 	$(CC) $(CFLAGS) $(TWIST_OBJS) curve25519-donna/curve25519-donna-c64.o $(LINKAGE) -o build/twist_aes
 
-test: curve25519 $(TEST_OBJS)
-	$(CC) $(CFLAGS) src/test.c build/curve25519-donna-c64.o build/sha256.o $(LINKAGE) -o build/curve_aes_test
+test: clean curve25519 $(TEST_OBJS)
+	$(CC) $(CFLAGS) $(TEST_OBJS) curve25519-donna/curve25519-donna-c64.o $(LINKAGE) -o build/curve_aes_test
