@@ -12,15 +12,19 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdbool.h>
 #include <stdint.h>
 #include <time.h>
 #include <string.h>
 #include <math.h>
+#include <getopt.h>
 
 #include <openssl/evp.h>
 #include <openssl/aes.h>
+#include <openssl/rand.h>
 
 #include "sha256.h"
+#include "optparse.h"
 
 extern int curve25519_donna(uint8_t *mypublic, const uint8_t *secret, const uint8_t *basepoint);
 
@@ -34,6 +38,7 @@ static char encoding_table[] = {'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H',
                                 'w', 'x', 'y', 'z', '0', '1', '2', '3',
                                 '4', '5', '6', '7', '8', '9', '+', '/'};
 static int mod_table[] = {0, 2, 1};
+static char *decoding_table = NULL;
 
 char *base64_encode(const unsigned char *data,
                     size_t input_length,
@@ -62,6 +67,54 @@ char *base64_encode(const unsigned char *data,
         encoded_data[*output_length - 1 - i] = '=';
 
     return encoded_data;
+}
+
+void build_decoding_table() {
+
+    decoding_table = malloc(256);
+
+    for (int i = 0; i < 64; i++)
+        decoding_table[(unsigned char) encoding_table[i]] = i;
+}
+
+
+void base64_cleanup() {
+    free(decoding_table);
+}
+
+unsigned char *base64_decode(const char *data,
+                             size_t input_length,
+                             size_t *output_length) {
+
+    if (decoding_table == NULL) build_decoding_table();
+
+    if (input_length % 4 != 0) return NULL;
+
+    *output_length = input_length / 4 * 3;
+    if (data[input_length - 1] == '=') (*output_length)--;
+    if (data[input_length - 2] == '=') (*output_length)--;
+
+    unsigned char *decoded_data = malloc(*output_length);
+    if (decoded_data == NULL) return NULL;
+
+    for (int i = 0, j = 0; i < input_length;) {
+
+        uint32_t sextet_a = data[i] == '=' ? 0 & i++ : decoding_table[data[i++]];
+        uint32_t sextet_b = data[i] == '=' ? 0 & i++ : decoding_table[data[i++]];
+        uint32_t sextet_c = data[i] == '=' ? 0 & i++ : decoding_table[data[i++]];
+        uint32_t sextet_d = data[i] == '=' ? 0 & i++ : decoding_table[data[i++]];
+
+        uint32_t triple = (sextet_a << 3 * 6)
+        + (sextet_b << 2 * 6)
+        + (sextet_c << 1 * 6)
+        + (sextet_d << 0 * 6);
+
+        if (j < *output_length) decoded_data[j++] = (triple >> 2 * 8) & 0xFF;
+        if (j < *output_length) decoded_data[j++] = (triple >> 1 * 8) & 0xFF;
+        if (j < *output_length) decoded_data[j++] = (triple >> 0 * 8) & 0xFF;
+    }
+
+    return decoded_data;
 }
 
 int aes_init(unsigned char *key_data, int key_data_len, unsigned char *salt, EVP_CIPHER_CTX *e_ctx, 
@@ -110,110 +163,247 @@ unsigned char *aes_decrypt(EVP_CIPHER_CTX *e, unsigned char *ciphertext, int *le
   return plaintext;
 }
 
-void print_seperator(){ // probably silly, but it cleans up the code below a bit.
+char *contents_of_file(char *file_path) {
+  FILE *fp = fopen(file_path, "r");
+  char *file_contents;
+  if (fp != NULL) {
+      if (fseek(fp, 0L, SEEK_END) == 0) {
+          long bufsize = ftell(fp);
+          if (bufsize == -1) { 
+            /* Error */ 
+          }
+          file_contents = malloc(sizeof(char) * (bufsize + 1));
+          if (fseek(fp, 0L, SEEK_SET) != 0) { 
+            /* Error */ 
+          }
+          size_t newLen = fread(file_contents, sizeof(char), bufsize, fp);
+          if (newLen == 0) {
+              fputs("Error reading file", stderr);
+          } else {
+              file_contents[++newLen] = '\0';
+          }
+      }
+      fclose(fp);
+      return file_contents;
+  }
+  return NULL;
+}
+
+void print_hash(unsigned char hash[])
+{
+   int idx;
+   for (idx=0; idx < 32; idx++)
+      printf("%02x",hash[idx]);
+   printf("\n");
+}
+
+void print_seperator()
+{ // probably silly, but it cleans up the code below a bit.
   printf("-------------------------------------------------------------\n");
 }
 
-int main(int argc, char const *argv[])
+void help() 
 {
+  printf("twist_aes tool (PoC) - Curve25519 + AES(CBC) encryption/decryption\n"
+         "Available actions;\n"
+         "-e ~ Encrypt the plaintext contents of a file using a computed shared key, then write the ciphertext to file."
+         "\tUsage; twist_aes -e [Path to file containing the plaintext] [Path for output ciphertext] [Path to peer's public key] [Path to your private key]\n"
+         "-d ~ Decrypt the ciphertext contents of a file using a computed shared key, then write the plaintext to file."
+         "\tUsage; twist_aes -e [Path to file containing the ciphertext] [Path for output plaintext] [Path to peer's public key] [Path to your private key]\n"
+         "-g ~ Compute private key\n"
+         "\tUsage; twist_aes -g [Path to output file for the new Private Key]\n"
+         "-p ~ Compute public key from private key\n"
+         "\tUsage; twist_aes -p [Path to Private Key] [Path to output file for the new Public Key]\n");
+}
+
+int main(int argc, char *argv[])
+{ 
+
   static const uint8_t basepoint[32] = {9};
   unsigned int salt[] = {12345, 54321};
   int olen, len;
-  unsigned char alice_private[32], alice_public[32], bob_private[32], bob_public[32], *ciphertext;
-  char *alice_private_encoded, *alice_public_encoded, *bob_private_encoded, *bob_public_encoded, *plaintext;
+  unsigned char private_key[32], public_key[32], *ciphertext, hash_buffer[32];
+  char *private_encoded, *private_unencoded, *public_encoded, *plaintext, *private_key_path, *data_path, *peer_pub_path, *output_path;
   size_t encoded_size; 
   uint8_t shared[32];
-  const char hash_buffer[64];
+  bool isEncrypting = false, isDecrypting = false, isGeneratingPrivateKey = false; 
+  int isGeneratingPublicKey = 0;
 
   BYTE buf[SHA256_BLOCK_SIZE];
   SHA256_CTX ctx;
   EVP_CIPHER_CTX en, de;
+  int opt;
 
-  print_seperator();
-  // Round one, Alice.
-  printf("Generating keys for Alice...");
-  // generate 32 random bytes for the private key
-  RAND_bytes(alice_private, sizeof(alice_private));
-  // base64 encode private key and spit it out
-  alice_private_encoded = base64_encode((const unsigned char*)alice_private, sizeof(alice_private), &encoded_size);
-  printf("\nPrivate Key #1 = %s\n", alice_private_encoded);
-  printf("Unencoded size: %lu\t-\t Encoded size: %zu\n", sizeof(alice_private), encoded_size);
-  // generate public key, encode it, and then spit it out
-  curve25519_donna(alice_public, alice_private, basepoint);
-  alice_public_encoded = base64_encode((const unsigned char*)alice_public, sizeof(alice_public), &encoded_size);
-  printf("Public Key  #1 = %s\n", alice_public_encoded);
-  printf("Unencoded size: %lu\t-\t Encoded size: %zu\n", sizeof(alice_public), encoded_size);
+  if (argc < 2) { help(); }
 
-  print_seperator();
-  
-  // Round two, Bob.
-  printf("Generating keys for Bob...");
-  // generate 32 random bytes for the private key
-  RAND_bytes(bob_private, sizeof(bob_private));
-  // base64 encode private key and spit it out
-  bob_private_encoded = base64_encode((const unsigned char*)bob_private, sizeof(bob_private), &encoded_size);
-  printf("\nPrivate Key #2 = %s\n", bob_private_encoded);
-  printf("Unencoded size: %lu\t-\t Encoded size: %zu\n", sizeof(bob_private), encoded_size);
-  // generate public key, encode it, and then spit it out
-  curve25519_donna(bob_public, bob_private, basepoint);
-  bob_public_encoded = base64_encode((const unsigned char*)bob_public, sizeof(bob_public), &encoded_size);  
-  printf("Public Key  #2 = %s\n", bob_public_encoded);
-  printf("Unencoded size: %lu\t-\t Encoded size: %zu\n", sizeof(bob_public), encoded_size);
-  print_seperator();
-
-  // Generate shared key and spit out the hash
-  curve25519_donna(shared, alice_private, bob_public);
-  sha256_init(&ctx);
-  sha256_update(&ctx, shared, strlen((const char *)shared));
-  sha256_final(&ctx, buf);
-
-  for (int idx=0; idx < 32; idx++) {
-    sprintf((char *)hash_buffer + strlen(hash_buffer),"%02x", buf[idx]);
+  while ((opt = getopt(argc, argv, "edgp:")) != -1) {
+      switch (opt) {
+        case 'e':
+          isEncrypting = true;
+          break;
+        case 'd':
+          isDecrypting = true;
+          break;
+        case 'g':
+          isGeneratingPrivateKey = true;
+          break;
+        case 'p':
+          isGeneratingPublicKey = true;
+          break;
+      }
   }
-  printf("Hashed secret: %s\n", (const char *)hash_buffer);
-  unsigned char *shared_hash = (unsigned char *)hash_buffer;
+   
+  if (isGeneratingPrivateKey == 1)
+  {
+    if (strlen(argv[2]) != 0)
+    {
+      printf("Generating private key...\n");
+           
+      output_path = argv[2];
 
-  // Define our message, then spit out the hash (for reference later)
-  const char *message_to_bob = "The quick brown fox jumps over the lazy dog";
-  memset((char *)hash_buffer, 0, sizeof(hash_buffer));
-  for (int idx=0; idx < 32; idx++) {
-    sprintf((char *)hash_buffer + strlen(hash_buffer),"%02x", message_to_bob[idx]);
+      FILE *outputFile = fopen(output_path, "wb");
+      RAND_bytes(private_key, sizeof(private_key));
+      //private_encoded = base64_encode((const unsigned char*)private_key, sizeof(private_key), &encoded_size);
+      fprintf(outputFile, "%s\n", private_key);
+      sha256_init(&ctx);
+      sha256_update(&ctx, private_key, sizeof(private_key));
+      sha256_final(&ctx, hash_buffer);
+      printf("Wrote private key to %s\nSHA256; ", output_path);
+      print_hash(hash_buffer);
+    } else {
+      printf("[ERROR] Argument -g requires -o to be defined!\n");
+      help();
+    }
   }
-  printf("Hashed original message: %s\n", (const char *)hash_buffer);
-  print_seperator();
+  if (isGeneratingPublicKey == 1)
+  {
+    if (strlen(argv[2]) != 0 && strlen(argv[3]) != 0)
+    {
+      printf("Generating public key...\n");
 
-  // Encrypt data with shared key
-  printf("Encrypting message...\n");
-  olen = len = strlen(message_to_bob)+1;
+      data_path = argv[2];
+      output_path = argv[3];
 
-  if (aes_init((unsigned char *)shared_hash, sizeof(shared_hash), (unsigned char *)&salt, &en, &de)) {
-    printf("Couldn't initialize AES cipher\n");
-    return -1;
+      FILE *fp = fopen(data_path, "r");
+      char *file_contents;
+      if (fp != NULL) {
+          if (fseek(fp, 0L, SEEK_END) == 0) {
+              long bufsize = ftell(fp);
+              if (bufsize == -1) { 
+                /* Error */ 
+              }
+              file_contents = malloc(sizeof(char) * (bufsize + 1));
+              if (fseek(fp, 0L, SEEK_SET) != 0) { 
+                /* Error */ 
+              }
+              size_t newLen = fread(file_contents, sizeof(char), bufsize, fp);
+              if (newLen == 0) {
+                  fputs("Error reading file", stderr);
+              } else {
+                  file_contents[++newLen] = '\0';
+              }
+          }
+          fclose(fp);
+      }
+      free(file_contents); 
+      strncpy((char *)private_key, (char *)file_contents, sizeof(file_contents));
+      curve25519_donna(public_key, private_key, basepoint);
+      FILE *outputFile = fopen(output_path, "wb");
+      fprintf(outputFile, "%s\n", public_key); 
+      fclose(outputFile);
+      sha256_init(&ctx);
+      sha256_update(&ctx, public_key, sizeof(public_key));
+      sha256_final(&ctx, hash_buffer);     
+      printf("Wrote public key to %s\n", output_path);
+      print_hash(hash_buffer);
+    } else {
+      printf("[ERROR] Action -p requires an input private key and an output file path as arguments\n");
+      help();
+    }
   }
 
-  // Spit out hash of ciphertext
-  ciphertext = aes_encrypt(&en, (unsigned char *)message_to_bob, &len);
-  memset((char *)hash_buffer, 0, sizeof(hash_buffer));
-  for (int idx=0; idx < 32; idx++) {
-    sprintf((char *)hash_buffer + strlen(hash_buffer),"%02x", ciphertext[idx]);
-  }
-  printf("Hashed ciphertext: %s\n", (const char *)hash_buffer);
+  if (isEncrypting)
+  {
+    if (strlen(argv[2]) != 0 && strlen(argv[3]) != 0 && strlen(argv[4]) != 0 && strlen(argv[5]) != 0)
+    {
+      printf("Encrypting data from file at path %s...\n", argv[2]);
+      data_path = argv[2];
+      output_path = argv[3];
+      peer_pub_path = argv[4];
+      private_key_path = argv[5];
+      strncpy((char *)private_key, (char *)contents_of_file(argv[5]), sizeof(contents_of_file(argv[5])));
+      strncpy((char *)public_key, (char *)contents_of_file(argv[4]), sizeof(contents_of_file(argv[4])));      
+      curve25519_donna(shared, private_key, public_key);
+      sha256_init(&ctx);
+      sha256_update(&ctx, shared, strlen((const char *)shared));
+      sha256_final(&ctx, buf);
+      printf("SHA256'd Key; ");
+      print_hash(shared);
 
-  // Spit out hash of plaintext 
-  plaintext = (char *)aes_decrypt(&de, ciphertext, &len);
-  memset((char *)hash_buffer, 0, sizeof(hash_buffer));
-  for (int idx=0; idx < 32; idx++) {
-    sprintf((char *)hash_buffer + strlen(hash_buffer),"%02x", plaintext[idx]);
+      if (aes_init((unsigned char *)shared, sizeof(shared), (unsigned char *)&salt, &en, &de)) {
+        printf("Couldn't initialize AES cipher\n");
+        return -1;
+      }
+      char *message = contents_of_file(data_path);
+      if (message == NULL)
+      {
+        printf("Couldn't read contents of data file\n");
+        return -1;
+      }
+      len = strlen(message)+1;
+      ciphertext = aes_encrypt(&en, (unsigned char *)message, &len);
+      if (ciphertext == NULL)
+      {
+        printf("Couldn't encrypt contents of data file\n");
+        return -1;
+      }
+      FILE *outputFile = fopen(output_path, "wb");
+      fprintf(outputFile, "%s\n", ciphertext);
+      printf("Encrypted contents written to %s\n", output_path);
+    }
+    return 0;
   }
-  printf("Hashed plaintext: %s\n", (const char *)hash_buffer);
-  print_seperator();
 
-  // Verify encryption and decryption was successful. 
-  if (strncmp(plaintext, message_to_bob, olen)) {
-    printf("AES: enc/dec failed\n");
-  }  else {
-    printf("AES: enc/dec passed\n");
+  if (isDecrypting)
+  {
+    if (strlen(argv[2]) != 0 && strlen(argv[3]) != 0 && strlen(argv[4]) != 0 && strlen(argv[5]) != 0)
+    {
+      printf("Decrypting data from file at path %s...\n", argv[2]);
+      data_path = argv[2];
+      output_path = argv[3];
+      peer_pub_path = argv[4];
+      private_key_path = argv[5];
+      strncpy((char *)private_key, (char *)contents_of_file(argv[5]), sizeof(contents_of_file(argv[5])));
+      strncpy((char *)public_key, (char *)contents_of_file(argv[4]), sizeof(contents_of_file(argv[4])));      
+      curve25519_donna(shared, private_key, public_key);
+      sha256_init(&ctx);
+      sha256_update(&ctx, shared, strlen((const char *)shared));
+      sha256_final(&ctx, buf);
+      printf("SHA256'd Key; ");
+      print_hash(shared);
+
+      if (aes_init((unsigned char *)shared, sizeof(shared), (unsigned char *)&salt, &en, &de)) {
+        printf("Couldn't initialize AES cipher\n");
+        return -1;
+      }
+      char *ciphertext = contents_of_file(data_path);
+      if (ciphertext == NULL)
+      {
+        printf("Couldn't read contents of data file\n");
+        return -1;
+      }
+      len = strlen(ciphertext)+1;
+      plaintext = (char *)aes_decrypt(&de, (unsigned char*)ciphertext, &len);
+      if (plaintext == NULL)
+      {
+        printf("Couldn't decrypt contents of data file, maybe check the peer public key...\n");
+        return -1;
+      }
+      FILE *outputFile = fopen(output_path, "wb");
+      fprintf(outputFile, "%s\n", plaintext);
+      printf("Encrypted contents written to %s\n", output_path);
+    }
+    return 0;
   }
-
   return 0;
 }
